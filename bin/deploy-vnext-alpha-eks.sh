@@ -1,23 +1,12 @@
 #!/usr/bin/env bash
-# vnext-install.sh
-#    - install mojaloop vnext version in a light-weight , simple and quick fashion 
-#      for demo's testing and development 
+# deploy-vnext-alpha-eks.sh 
+#    - install mojaloop vnext version in EKS
 #
-# refer : @#see @https://github.com/mojaloop/platform-shared-tools            
+# refer : @#see @https://github.com/mojaloop/platform-shared-tools          
 # Author Tom Daly 
-# Date May 2023
+# Date June 2023
 
 # todo list :
-# - copy in the database data [done] 
-# 
-# - add the vNext hosts to the hosts list in the k8s-install.sh [done] 
-# - starting adding the curl tests for the endpoints that should come up
-# - add option for not installing elasticsearch/kibana [done] 
-# - add elasticsearch and other logging/auditing endpoints to url and health checks 
-# - add redpanda and mongo express (maybe as options I could have a -o consoles option )
-# - if no -o logging option make sure that logging is off => do need configure_vnext.py [Done]
-# - add the trap error handler to all routines and have a list of error messages 
-# - check that all PV and PVCs have gone on delete_ml 
 
 
 handle_error() {
@@ -28,16 +17,6 @@ handle_error() {
   echo
   echo "    ** Error exit code $exit_code on line $line_number : $message Exiting..."
   exit $exit_code
-}
-
-function check_arch {
-  ## check architecture Mojaloop deploys on x64 only today arm is coming  
-  arch=`uname -p`
-  if [[ ! "$arch" == "x86_64" ]]; then 
-    printf " ** Error: Mojaloop is only running on x86_64 today and not yet running on ARM cpus \n"
-    printf "    please see https://github.com/mojaloop/project/issues/2317 for ARM status \n"
-    printf " ** \n"
-  fi
 }
 
 function check_user {
@@ -56,53 +35,6 @@ function check_deployment_dir_exists  {
   fi 
 }
 
-function set_k8s_distro { 
-  # various settings can differ between kubernetes releases and distributions 
-  # so we need to figure out what kubernetes distribution is installed and running
-  if [[ -f "/snap/bin/microk8s" ]]; then 
-    k8s_distro="microk8s"
-  elif [[ -f "/usr/local/bin/k3s" ]]; then 
-    k8s_distro="k3s"
-  else
-    printf " ** Error: can't find either microk8s or k3s kubernetes distributions  \n"
-    printf "    have you run k8s-install.sh to install one of these ? \n"
-    printf " ** \n"
-    exit 1      
-  fi 
-  printf "==> the installed kubernetes distribution is  [%s] \n" "$k8s_distro"
-}
-
-function set_k8s_version { 
-  k8s_version=`kubectl version --short 2>/dev/null | grep "^Server" | perl -ne 'print if s/^.*v1.(\d+).*$/v1.\1/'`
-}
-
-function print_current_k8s_releases {
-    printf "          Current Kubernetes releases are : " 
-    for i in "${K8S_CURRENT_RELEASE_LIST[@]}"; do
-        printf " [v%s]" "$i"
-    done
-    printf "\n"
-}
-
-function check_k8s_version_is_current {
-  is_current_release=false
-  ver=`echo $k8s_version|  tr -d A-Z | tr -d a-z `
-  for i in "${K8S_CURRENT_RELEASE_LIST[@]}"; do
-      if  [[ "$ver" == "$i" ]]; then
-        is_current_release=true
-        break
-      fi  
-  done
-  if [[ ! $is_current_release == true ]]; then 
-      printf "** Error: The current installed kubernetes release [ %s ] is not a current release \n" "$k8s_version"
-      printf "          you must have a current kubernetes release installed to use this script \n"
-      print_current_k8s_releases 
-      printf "          for releases of kubernetes earlier than v1.22 mini-loop 3.0 might be of use \n"
-      printf "** \n"
-      exit 1
-  fi 
-  printf "==> the installed kubernetes release or version is detected to be  [%s] \n" "$k8s_version"
-}
 
 function set_mojaloop_timeout { 
   ## Set timeout 
@@ -137,21 +69,15 @@ function set_logfiles {
   fi 
   touch $LOGFILE
   touch $ERRFILE
-  printf "start : mini-loop Mojaloop local install utility [%s]\n" "`date`" >> $LOGFILE
+  printf "start :  Mojaloop vnext-alpha install utility [%s]\n" "`date`" >> $LOGFILE
   printf "================================================================================\n" >> $LOGFILE
-  printf "start : mini-loop Mojaloop local install utility [%s]\n" "`date`" >> $ERRFILE
+  printf "start :  Mojaloop vnext-alpha install utility [%s]\n" "`date`" >> $ERRFILE
   printf "================================================================================\n" >> $ERRFILE
   printf "==> logfiles can be found at %s and %s \n" "$LOGFILE" "$ERRFILE"
 }
 
 function configure_extra_options {
-  printf "==> configuring which Mojaloop vNext options to install   \n"
-  # if [ -z ${install_opt+x} ] ; then 
-  #   printf " ** Error: mini-loop requires information about which optional modules to configure when using -m config_ml   \n"
-  #   printf "           example: to configure mojaloop to enable thirdparty charts and bulk-api use:-  \n"
-  #   printf "           $0 -m config_ml -o thirdparty,bulk \n"
-  #   exit 1 
-  # fi 
+  printf "==> configuring which Mojaloop vNext options to install   \n" 
   for mode in $(echo $install_opt | sed "s/,/ /g"); do
     case $mode in
       logging)
@@ -167,6 +93,34 @@ function configure_extra_options {
   done 
 } 
 
+function configure_kubectl { 
+  aws eks --region $(terraform output -raw region) update-kubeconfig \
+    --name $(terraform output -raw cluster_name)
+}
+
+function add_helm_repos { 
+    printf "==> add the helm repos required to install and run Mojaloop vnext-alpha \n" 
+    helm repo add kiwigrid https://kiwigrid.github.io > /dev/null 2>&1
+    helm repo add kokuwa https://kokuwaio.github.io/helm-charts > /dev/null 2>&1  #fluentd 
+    helm repo add elastic https://helm.elastic.co > /dev/null 2>&1
+    helm repo add codecentric https://codecentric.github.io/helm-charts > /dev/null 2>&1 # keycloak for TTK
+    helm repo add bitnami https://charts.bitnami.com/bitnami > /dev/null 2>&1
+    helm repo add mojaloop http://mojaloop.io/helm/repo/ > /dev/null 2>&1
+    helm repo add cowboysysop https://cowboysysop.github.io/charts/ > /dev/null 2>&1  # mongo-express
+    helm repo add redpanda-data https://charts.redpanda.com/ > /dev/null 2>&1   # kafka console 
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx   # nginx 
+    helm repo update 
+}
+
+function deploy_nginx_configure_nlb {
+  printf "==> deploy nginx with meta-data set to provision AWS NLB (network load balancer) \n" 
+  helm install nginx ingress-nginx/ingress-nginx \
+    --set controller.service.type=LoadBalancer \
+    --set controller.ingressClassResource.default=true \
+    --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb"
+}
+
+
 function set_and_create_namespace { 
   ## Set and create namespace if necessary 
   if [[ ! -z "$nspace" ]]; then 
@@ -177,22 +131,6 @@ function set_and_create_namespace {
   fi
   printf "==> Setting NAMESPACE to [ %s ] \n" "$NAMESPACE"
 }
-
-# function clone_mojaloop_repo {
-#   if [ ! -z "$force" ]; then 
-#     printf "==> removing existing helm directory\n"
-#     rm -rf $REPO_BASE_DIR 
-#   fi 
-#   if [[ ! -d "$REPO_BASE_DIR" ]]; then
-#     mkdir "$REPO_BASE_DIR"
-#   fi
-#   # check if repo exists , clone new if not 
-#   if [[ ! -d "$REPO_DIR" ]]; then
-#     printf "==> cloning repo from https://github.com/mojaloop/platform-shared-tools.git \n"
-#     git clone --branch $MOJALOOP_BRANCH https://github.com/mojaloop/platform-shared-tools.git $REPO_DIR > /dev/null 2>&1
-#     NEED_TO_REPACKAGE="true"
-#   fi 
-# }
 
 function clone_mojaloop_repo { 
   printf "==> cloning mojaloop vNext repo  "
@@ -232,8 +170,8 @@ function modify_local_mojaloop_yaml_and_charts {
       NEED_TO_REPACKAGE="false"
     fi 
   fi
-  printf "     executing $SCRIPTS_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
-  $SCRIPTS_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR 
+  printf "     executing $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
+  $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR 
   if [[ $? -ne 0  ]]; then 
       printf " [ failed ] \n"
       exit 1 
@@ -283,7 +221,7 @@ function delete_mojaloop_infra_release {
 }
 
 function install_infra_from_local_chart  {
-  printf "start : mini-loop Mojaloop vNext install infrastructure services [%s]\n" "`date`" 
+  printf "start :  Mojaloop vNext-alpha install infrastructure services [%s]\n" "`date`" 
   delete_mojaloop_infra_release
   repackage_infra_helm_chart
   # install the chart
@@ -486,13 +424,13 @@ function check_urls {
 
 function print_end_banner {
   printf "\n\n****************************************************************************************\n"
-  printf "            -- mini-loop Mojaloop vNext install utility -- \n"
+  printf "            --  Mojaloop vNext-alpha install utility -- \n"
   printf "********************* << END >> ********************************************************\n\n"
 }
 
 function print_stats {
   # print out all the elapsed times in the timer_array
-  printf "\n********* mini-loop stats *******************************\n"
+  printf "\n********* installation stats *******************************\n"
   printf "kubernetes distro:version  [%s]:[%s] \n" "$k8s_distro" "$k8s_version"
 
   printf "installation options [%s] \n" "$install_opt"
@@ -516,12 +454,11 @@ function print_stats {
   for key in "${!memstats_array[@]}"; do
     printf "%-14s| %s\n" "$key" "${memstats_array[$key]}"
   done
-  printf "\n************ mini-loop stats ******************************\n"
+  printf "\n************ installation stats ******************************\n"
 }
 
 function print_success_message { 
-  #printf " ==> %s configuration of mojaloop deployed ok and passes endpoint health checks \n" "$RELEASE_NAME"
-  printf " ==>  mojaloop vNext deployed \n" 
+  printf " ==>  mojaloop vNext-alpha deployed \n" 
   printf "      no endpoint tests configured yet this is still WIP \n" 
   print_end_banner 
   
@@ -574,9 +511,14 @@ LOGFILE="/tmp/miniloop-install.log"
 ERRFILE="/tmp/miniloop-install.err"
 DEFAULT_TIMEOUT_SECS="1200s"
 TIMEOUT_SECS=0
-SCRIPTS_DIR="$( cd $(dirname "$0")/../scripts ; pwd )"
+SCRIPT_DIR=$( cd $(dirname "$0") ; pwd )
+#BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd ) 
+echo $SCRIPT_DIR
+echo $BASE_DIR
+
 ETC_DIR="$( cd $(dirname "$0")/../etc ; pwd )"
 REPO_BASE_DIR=$HOME/vnext
+#SCRIPTS_DIR="$( cd $(dirname "$0")/../scripts ; pwd )"
 REPO_DIR=$REPO_BASE_DIR/platform-shared-tools
 DEPLOYMENT_DIR=$REPO_DIR/packages/deployment/k8s
 export INFRA_DIR=$DEPLOYMENT_DIR/infra
@@ -622,16 +564,15 @@ done
 
 
 printf "\n\n****************************************************************************************\n"
-printf "            -- mini-loop Mojaloop (vNext) install utility -- \n"
+printf "            -- Mojaloop vNext-alpha install utility -- \n"
 printf "********************* << START  >> *****************************************************\n\n"
-check_arch
 check_user
-set_k8s_distro
-set_k8s_version
-check_k8s_version_is_current 
 set_logfiles 
 set_and_create_namespace
 set_mojaloop_timeout
+#configure_kubectl 
+#add_helm_repos
+
 printf "\n"
 
 if [[ "$mode" == "delete_ml" ]]; then
@@ -640,13 +581,15 @@ if [[ "$mode" == "delete_ml" ]]; then
   delete_mojaloop_layer "apps" $APPS_DIR
   delete_mojaloop_layer "crosscut" $CROSSCUT_DIR
   delete_mojaloop_infra_release  
+  #helm delete nginx  # remove nginx which will remove NLB too 
   print_end_banner
 elif [[ "$mode" == "install_ml" ]]; then
   tstart=$(date +%s)
-  printf "start : mini-loop Mojaloop (vNext) install utility [%s]\n" "`date`" >> $LOGFILE
+  printf "start : Mojaloop (vNext) install utility [%s]\n" "`date`" >> $LOGFILE
   clone_mojaloop_repo 
   configure_extra_options 
   modify_local_mojaloop_yaml_and_charts
+  #deploy_nginx_configure_nlb
   install_infra_from_local_chart
   install_mojaloop_layer "crosscut" $CROSSCUT_DIR 
   install_mojaloop_layer "apps" $APPS_DIR

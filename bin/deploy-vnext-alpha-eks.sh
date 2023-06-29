@@ -80,12 +80,13 @@ function configure_extra_options {
   printf "==> configuring which Mojaloop vNext options to install   \n" 
   for mode in $(echo $install_opt | sed "s/,/ /g"); do
     case $mode in
-      logging)
-        MOJALOOP_CONFIGURE_FLAGS_STR+="--logging "
-        ram_warning="true"
+      logging) MOJALOOP_CONFIGURE_FLAGS_STR+="--logging "
+               ram_warning="true"
         ;;
+      allocate) MOJALOOP_CONFIGURE_FLAGS_STR+="--allocate"
+      ;;
       *)
-          printf " ** Error: specifying -o option   \n"
+          printf " ** Error: specifying -o option \n"
           printf "    try $0 -h for help \n" 
           exit 1 
         ;;
@@ -114,10 +115,15 @@ function add_helm_repos {
 
 function deploy_nginx_configure_nlb {
   printf "==> deploy nginx with meta-data set to provision AWS NLB (network load balancer) \n" 
-  helm install nginx ingress-nginx/ingress-nginx \
-    --set controller.service.type=LoadBalancer \
-    --set controller.ingressClassResource.default=true \
-    --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb"
+  nginx_exists=`helm ls -a --namespace $NAMESPACE | grep "nginx" | awk '{print $1}' `
+  if [ ! -z $nginx_exists ] && [ "$nginx_exists" == "nginx" ]; then 
+    printf "    ** NOTE: nigix is already installed .. skipping \n"
+  else 
+    helm install nginx ingress-nginx/ingress-nginx \
+      --set controller.service.type=LoadBalancer \
+      --set controller.ingressClassResource.default=true \
+      --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb"
+  fi
 }
 
 
@@ -147,6 +153,22 @@ function clone_mojaloop_repo {
     printf "\n    ** INFO: vnext  repo is not cloned as there is an existing $REPO_DIR directory\n"
     printf "    to get a fresh clone of the repo , either delete $REPO_DIR of use the -f flag **\n"
   fi
+}
+
+function modify_local_mojaloop_yaml_and_charts {
+  printf "==> configuring Mojaloop vNext yaml and helm chart values \n" 
+  if [ ! -z ${domain_name+x} ]; then 
+    printf "==> setting domain name to <%s> \n " $domain_name 
+    MOJALOOP_CONFIGURE_FLAGS_STR+="--domain_name $domain_name " 
+  fi
+
+  # TODO We want to avoid running the helm repackage when we don't need to 
+  printf "     executing $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
+  $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR 
+  if [[ $? -ne 0  ]]; then 
+      printf " [ failed ] \n"
+      exit 1 
+  fi 
 }
 
 function modify_local_mojaloop_yaml_and_charts {
@@ -450,10 +472,10 @@ function print_stats {
   # Get system memory 
   total_mem=$(free -m | awk 'NR==2{printf "%.2fGB      | %.2fGB    | %.2f%%", $3/1024, $4/1024, $3*100/($3+$4)}')
   #printf "\n%-14s| %s\n" "$date" "$total_mem"
-  record_memory_use "at_end"
-  for key in "${!memstats_array[@]}"; do
-    printf "%-14s| %s\n" "$key" "${memstats_array[$key]}"
-  done
+  #record_memory_use "at_end"
+  # for key in "${!memstats_array[@]}"; do
+  #   printf "%-14s| %s\n" "$key" "${memstats_array[$key]}"
+  # done
   printf "\n************ installation stats ******************************\n"
 }
 
@@ -507,8 +529,8 @@ MOJALOOP_BRANCH="main"
 DEFAULT_NAMESPACE="default"
 k8s_version=""
 K8S_CURRENT_RELEASE_LIST=( "1.26" "1.27" )
-LOGFILE="/tmp/miniloop-install.log"
-ERRFILE="/tmp/miniloop-install.err"
+LOGFILE="/tmp/install.log"
+ERRFILE="/tmp/install.err"
 DEFAULT_TIMEOUT_SECS="1200s"
 TIMEOUT_SECS=0
 SCRIPT_DIR=$( cd $(dirname "$0") ; pwd )
@@ -531,7 +553,7 @@ EXTERNAL_ENDPOINTS_LIST=( vnextadmin fspiop.local bluebank.local greenbank.local
 LOGGING_ENDPOINTS_LIST=( elasticsearch.local )
 declare -A timer_array
 declare -A memstats_array
-record_memory_use "at_start"
+#record_memory_use "at_start"
 
 # Process command line options as required
 while getopts "fd:m:t:l:o:hH" OPTION ; do
@@ -569,14 +591,15 @@ printf "********************* << START  >> *************************************
 check_user
 set_logfiles 
 set_and_create_namespace
-set_mojaloop_timeout
-#configure_kubectl 
-#add_helm_repos
+# set_mojaloop_timeout
+# configure_kubectl 
+# add_helm_repos
 
 printf "\n"
 
 if [[ "$mode" == "delete_ml" ]]; then
-  check_deployment_dir_exists
+  #check_deployment_dir_exists
+  clone_mojaloop_repo # as it might not exist
   delete_mojaloop_layer "ttk" $TTK_DIR
   delete_mojaloop_layer "apps" $APPS_DIR
   delete_mojaloop_layer "crosscut" $CROSSCUT_DIR
@@ -589,13 +612,13 @@ elif [[ "$mode" == "install_ml" ]]; then
   clone_mojaloop_repo 
   configure_extra_options 
   modify_local_mojaloop_yaml_and_charts
-  #deploy_nginx_configure_nlb
-  install_infra_from_local_chart
-  install_mojaloop_layer "crosscut" $CROSSCUT_DIR 
-  install_mojaloop_layer "apps" $APPS_DIR
-  install_mojaloop_layer "ttk" $TTK_DIR
-  restore_data
-  check_urls
+  # deploy_nginx_configure_nlb
+  # install_infra_from_local_chart
+  # install_mojaloop_layer "crosscut" $CROSSCUT_DIR 
+  # install_mojaloop_layer "apps" $APPS_DIR
+  # install_mojaloop_layer "ttk" $TTK_DIR
+  # #restore_data
+  # check_urls
 
   tstop=$(date +%s)
   telapsed=$(timer $tstart $tstop)

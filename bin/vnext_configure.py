@@ -51,6 +51,40 @@ def update_key(key, value, dictionary):
                     for result in update_key(key, value, d):
                         yield result
  
+def allocate_infra_pods(p,yaml):
+    infra_charts_list = [
+        'kafka',
+        'mongodb'
+    ]
+    non_infra_charts_list = [
+        'redpanda-console',
+        'mongo-express',
+        'redis',
+        'elasticsearch'
+    ]
+
+    print("==> updating infra values.yaml to allocate pods to node_class=infra ")
+    for vf in p.glob('**/*values.yaml') :
+        with open(vf) as f:
+            data = yaml.load(f)
+            print(f"===> Processing file < {vf.parent}/{vf.name} > ")
+
+        for c in infra_charts_list: 
+            print(f"looking for infrastructure chart: {c} ")
+            for x, value in lookup(c, data):  
+                if isinstance(x, list) and len(x)==1 : 
+                    #value.setdefault('nodeSelector', {})['node_class'] = 'infra'
+                    value.insert(0, 'nodeSelector', {'node_class': 'infra'})
+                    print(f" x is: {x} and isinstance: {type(x)} and value is: {value}\n")
+        
+        for c in non_infra_charts_list: 
+            print(f"looking for non infrastructure chart: {c} ")
+            for x, value in lookup(c, data):  
+                if isinstance(x, list) and len(x)==1 : 
+                    value.insert(0, 'nodeSelector', {'node_class': 'non_infra'})
+                    print(f" x is: {x} and isinstance: {type(x)} and value is: {value}\n")
+        with open(vf, "w") as f:
+            yaml.dump(data,f)
 
 def enable_or_disable_logging(p,yaml,verbose=False,deploy_logging=False):
     deploy_logging_str="not deploy"
@@ -118,6 +152,7 @@ def parse_args(args=sys.argv[1:]):
     parser.add_argument("-v", "--verbose", required=False, action="store_true", help="print more verbose messages ")
     parser.add_argument("-l", "--logging", required=False, action="store_true", help="enable logging and auditing  ")
     parser.add_argument("--domain_name", type=str, required=False, default=None, help="e.g. mydomain.com   ")
+    parser.add_argument("--allocate", required=False, action="store_true", help="update yaml to allocate infra pods to infra nodes ")
 
     args = parser.parse_args(args)
     if len(sys.argv[1:])==0:
@@ -142,6 +177,10 @@ def main(argv) :
     yaml.indent(mapping=2, sequence=6, offset=2)
     yaml.width = 4096
 
+    if args.allocate:
+        print(f" allocate pods to infra node_class nodes -- assumes node pool exists for now ")
+        allocate_infra_pods(p,yaml)
+        sys.exit(1)
     if args.domain_name :
          modify_values_for_dns_domain_name(p,args.domain_name,args.verbose)
     if args.logging :

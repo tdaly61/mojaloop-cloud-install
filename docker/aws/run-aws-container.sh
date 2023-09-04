@@ -6,7 +6,7 @@
 
 ## User settings change these to reflect your locations  
 AWS_CREDENTIALS_DIR="$HOME/.aws"   # directory with the aws "credentials file"
-AWS_PROFILE="mojaloop"            
+AWS_PROFILE="vnext"            
 
 SCRIPT_DIR=$( cd $(dirname "$0") ; pwd )
 BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd ) 
@@ -33,7 +33,5 @@ docker run \
   --env AWS_PROFILE="$AWS_PROFILE" \
   --volume "$TERRAFORM_DIR":/terraform-aws \
   --volume "$MOJALOOP_BIN_DIR":/mojaloop_cloud_bin \
+  --hostname "container-vnext-eks" \
   --entrypoint=/bin/bash $DOCKER_IMAGE_NAME $@
-
-# --volume "$HOME"/.ssh:/home/${USER_NAME}/.ssh \
-#  --volume "$HOME/mini-loop":/home/${USER_NAME}/mini-loop \

@@ -39,6 +39,6 @@ RUN curl -L -o  helm.tar.gz https://get.helm.sh/helm-v${HELM_VERSION}-linux-${AR
   && rm -rf helm.tar.gz linux-${ARCH}
 
 USER  ${USER_NAME}
-COPY --chown=${USER_NAME} install/${BASHRC_FILE} /home/${USER_NAME}/.bashrc 
+COPY --chown=${USER_NAME}:${USER_NAME} install/bashrc /home/${USER_NAME}/.bashrc
 
 ENTRYPOINT ["/bin/bash"]

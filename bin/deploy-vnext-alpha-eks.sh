@@ -7,6 +7,26 @@
 # Date June 2023
 
 # todo list :
+# - make automation super-simple (electron -> .ini -> as input)
+# - setting kubectl config: if you are not in the terraform directory to run this it fails with an aws error => make this more robust
+# - cleanup: make sure all resources are cleaned up
+# - implement -o logging properly => no option just default to install , also all consoles on !
+# - implement DNS properly 
+# - label nodes so that infrastructure can go to infrastructure nodes e.g. mongo, kafka eetc go to infrastructure nodes 
+#   also make it so that it is easy to test mongo and kafka and redis on seperate nodes for benchmarking & sizing 
+# - fix the memory and resource usage stats reporting
+# - start deploying to 4 seperate namespaces infra, crosscut , apps and testing 
+# - introduce calico and stop east-west traffic 
+# - start securing cluster
+#   - HTTPS endpoint 
+#   - API Mgmt 
+#   - ISTIO/Service Mesh in conjunction with Envoy 
+# - AWS networking best-practice 
+# - CIS/Aqua security checks
+# - AWS EKS best practice -- look for guides 
+# - investigate AWS tenancies , shoud I be using ? 
+# - Orca ?? 
+
 
 
 handle_error() {
@@ -95,8 +115,18 @@ function configure_extra_options {
 } 
 
 function configure_kubectl { 
-  aws eks --region $(terraform output -raw region) update-kubeconfig \
-    --name $(terraform output -raw cluster_name)
+  # to configure $HOME/.kube/config currently need to be in the directory where the terraform that created the cluster resides
+  if [[ -d ${TERRAFORM_DIRECTORY} ]]; then 
+    echo "terraform_dir is $TERRAFORM_DIRECTORY" 
+    pushd $TERRAFORM_DIRECTORY
+    aws eks --region $(terraform output -raw region) update-kubeconfig --name $(terraform output -raw cluster_name) > /dev/null 2>&1 
+    if [[ $? -ne 0  ]]; then 
+        printf " [ failed ] \n"
+        exit 1 
+    fi 
+  fi
+  exit 
+
 }
 
 function add_helm_repos { 
@@ -117,7 +147,7 @@ function deploy_nginx_configure_nlb {
   printf "==> deploy nginx with meta-data set to provision AWS NLB (network load balancer) \n" 
   nginx_exists=`helm ls -a --namespace $NAMESPACE | grep "nginx" | awk '{print $1}' `
   if [ ! -z $nginx_exists ] && [ "$nginx_exists" == "nginx" ]; then 
-    printf "    ** NOTE: nigix is already installed .. skipping \n"
+    printf "    ** NOTE: nginx is already installed .. skipping \n"
   else 
     helm install nginx ingress-nginx/ingress-nginx \
       --set controller.service.type=LoadBalancer \
@@ -189,7 +219,7 @@ function modify_local_mojaloop_yaml_and_charts {
   else # no logging specified 
     if ls $CROSSCUT_DIR | grep -q '\.off$'; then
       #echo "off files => logging already off  => skip repackage "
-      NEED_TO_REPACKAGE="false"
+      NEED_TO_REPACKAGE="true"
     fi 
   fi
   printf "     executing $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
@@ -505,7 +535,7 @@ Example 3 : $0 -m install_ml -o logging -f # install , turn on logging , force c
 Example 4 : $0 -m delete_ml  # delete mojaloop  (vnext)  
 
 Options:
--m mode ............ install_ml|delete_ml
+-m mode ............ install_ml|delete_ml|cleanup
 -d domain name ..... domain name for ingress hosts e.g mydomain.com 
 -n namespace ....... the kubernetes namespace to deploy mojaloop into 
 -f force ........... force the cloning and updating of the Mojaloop vNext repo
@@ -533,6 +563,7 @@ LOGFILE="/tmp/install.log"
 ERRFILE="/tmp/install.err"
 DEFAULT_TIMEOUT_SECS="1200s"
 TIMEOUT_SECS=0
+TERRAFORM_DIRECTORY="."
 SCRIPT_DIR=$( cd $(dirname "$0") ; pwd )
 #BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd ) 
 echo $SCRIPT_DIR
@@ -547,7 +578,7 @@ export INFRA_DIR=$DEPLOYMENT_DIR/infra
 export CROSSCUT_DIR=$DEPLOYMENT_DIR/crosscut
 export APPS_DIR=$DEPLOYMENT_DIR/apps
 export TTK_DIR=$DEPLOYMENT_DIR/ttk
-NEED_TO_REPACKAGE="false"
+NEED_TO_REPACKAGE="true"
 export MOJALOOP_CONFIGURE_FLAGS_STR=" -d $REPO_BASE_DIR " 
 EXTERNAL_ENDPOINTS_LIST=( vnextadmin fspiop.local bluebank.local greenbank.local ) 
 LOGGING_ENDPOINTS_LIST=( elasticsearch.local )
@@ -556,8 +587,10 @@ declare -A memstats_array
 #record_memory_use "at_start"
 
 # Process command line options as required
-while getopts "fd:m:t:l:o:hH" OPTION ; do
+while getopts "fD:d:m:t:l:o:hH" OPTION ; do
    case "${OPTION}" in
+        D)  TERRAFORM_DIRECTORY="${OPTARG}"
+        ;;
         n)  nspace="${OPTARG}"
         ;;
         f)  force="true"
@@ -591,20 +624,22 @@ printf "********************* << START  >> *************************************
 check_user
 set_logfiles 
 set_and_create_namespace
-# set_mojaloop_timeout
-# configure_kubectl 
-# add_helm_repos
+set_mojaloop_timeout
+#configure_kubectl 
+add_helm_repos
 
 printf "\n"
 
-if [[ "$mode" == "delete_ml" ]]; then
-  #check_deployment_dir_exists
+if [[ "$mode" == "delete_ml" || "$mode" == "cleanup" ]]; then
+  check_deployment_dir_exists
   clone_mojaloop_repo # as it might not exist
   delete_mojaloop_layer "ttk" $TTK_DIR
   delete_mojaloop_layer "apps" $APPS_DIR
   delete_mojaloop_layer "crosscut" $CROSSCUT_DIR
   delete_mojaloop_infra_release  
-  #helm delete nginx  # remove nginx which will remove NLB too 
+  if [[ "$mode" == "cleanup" ]]; then
+    helm delete nginx  # remove nginx which will remove NLB too 
+  fi 
   print_end_banner
 elif [[ "$mode" == "install_ml" ]]; then
   tstart=$(date +%s)
@@ -612,13 +647,13 @@ elif [[ "$mode" == "install_ml" ]]; then
   clone_mojaloop_repo 
   configure_extra_options 
   modify_local_mojaloop_yaml_and_charts
-  # deploy_nginx_configure_nlb
-  # install_infra_from_local_chart
-  # install_mojaloop_layer "crosscut" $CROSSCUT_DIR 
-  # install_mojaloop_layer "apps" $APPS_DIR
-  # install_mojaloop_layer "ttk" $TTK_DIR
-  # #restore_data
-  # check_urls
+  deploy_nginx_configure_nlb
+  install_infra_from_local_chart
+  install_mojaloop_layer "crosscut" $CROSSCUT_DIR 
+  install_mojaloop_layer "apps" $APPS_DIR
+  install_mojaloop_layer "ttk" $TTK_DIR
+  #restore_data
+  check_urls
 
   tstop=$(date +%s)
   telapsed=$(timer $tstart $tstop)

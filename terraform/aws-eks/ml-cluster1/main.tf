@@ -6,7 +6,7 @@ data "aws_availability_zones" "available" {}
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "5.0.0"
+  version = "5.1.1"
 
   name = var.vpc_name
 
@@ -20,21 +20,24 @@ module "vpc" {
   single_nat_gateway   = true
   enable_dns_hostnames = true
   map_public_ip_on_launch = true
+  enable_dns_support   = true
 
   public_subnet_tags = {
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/elb"                      = 1
+    "mojaloop/cost_center" = "vnext"
   }
 
   private_subnet_tags = {
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     "kubernetes.io/role/internal-elb"             = 1
+    "mojaloop/cost_center" = "vnext"
   }
 }
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "19.15.3"
+  version = "19.16.0"
 
   cluster_name    = var.cluster_name
   cluster_version = var.k8s_version
@@ -50,9 +53,10 @@ module "eks" {
   eks_managed_node_groups = {
     one = {
       name = "node-group-1"
-      instance_types = ["t3.large"]
+      instance_types = ["t2.xlarge"]
+      capacity_type  = "ON_DEMAND"
       min_size     = 1
-      max_size     = 2
+      max_size     = 3
       desired_size = 2
 
       labels = {
@@ -61,7 +65,7 @@ module "eks" {
     }
     two = {
       name = "node-group-2"
-      instance_types = ["t3.large"]
+      instance_types = ["t2.xlarge"]
       min_size     = 1
       max_size     = 3
       desired_size = 2

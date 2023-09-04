@@ -180,7 +180,6 @@ def main(argv) :
     if args.allocate:
         print(f" allocate pods to infra node_class nodes -- assumes node pool exists for now ")
         allocate_infra_pods(p,yaml)
-        sys.exit(1)
     if args.domain_name :
          modify_values_for_dns_domain_name(p,args.domain_name,args.verbose)
     if args.logging :

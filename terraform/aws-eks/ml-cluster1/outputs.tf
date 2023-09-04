@@ -1,3 +1,7 @@
+output "availability_zones" {
+  description = "availability zones in region" 
+  value       = data.aws_availability_zones.available
+}
 
 output "cluster_endpoint" {
   description = "Endpoint for EKS control plane"

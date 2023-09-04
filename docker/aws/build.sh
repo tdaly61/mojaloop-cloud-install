@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# build.sh for docker container to run aws cli and aws-mfa auth tool
+#          also for terraform and kubernetes clients and utils
+# Tom Daly : Aug 2023 
 
 ################################################################################
 # Function: showUsage
@@ -19,19 +22,19 @@ function showUsage {
 		fi
 }
 
-function check_and_add_mfa_device_to_docker_bashrc {
-	if [[ -z "$MFA_DEVICE" ]]; then 
-		printf "** Error: need to set the registered AWS MFA device in the environment before calling build.sh \n"
-		printf "          i.e. export MFA_DEVICE=\"<your AWS ARN>\" \n" 
-		printf "          which will look similar to export MFA_DEVICE=\"arn:aws:iam::111111111111:mfa/fred\" \n"
-		printf "          see: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_enable_virtual.html \n"
-		printf "          see: aws-mfa utility details at https://pypi.org/project/aws-mfa/ \n" 
-		exit 1
-	fi 
-	# add the MFA_DEVICE to the bashrc that will be added to the docker container 
-	cp $INSTALL_DIR/bashrc $INSTALL_DIR/$BASHRC_FILE
-	echo "export MFA_DEVICE=$MFA_DEVICE" >> $INSTALL_DIR/$BASHRC_FILE
-}
+# function check_and_add_mfa_device_to_docker_bashrc {
+# 	if [[ -z "$MFA_DEVICE" ]]; then 
+# 		printf "** Error: need to set the registered AWS MFA device in the environment before calling build.sh \n"
+# 		printf "          i.e. export MFA_DEVICE=\"<your AWS ARN>\" \n" 
+# 		printf "          which will look similar to export MFA_DEVICE=\"arn:aws:iam::111111111111:mfa/fred\" \n"
+# 		printf "          see: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_enable_virtual.html \n"
+# 		printf "          see: aws-mfa utility details at https://pypi.org/project/aws-mfa/ \n" 
+# 		exit 1
+# 	fi 
+# 	# add the MFA_DEVICE to the bashrc that will be added to the docker container 
+# 	cp $INSTALL_DIR/bashrc $INSTALL_DIR/$BASHRC_FILE
+# 	echo "export MFA_DEVICE=$MFA_DEVICE" >> $INSTALL_DIR/$BASHRC_FILE
+# }
 
 function docker_build_nocache {
 		echo "No-Cache" 
@@ -41,7 +44,6 @@ function docker_build_nocache {
 		 	--build-arg ARCH=$ARCH \
 			--build-arg TERRAFORM_VERSION=$TERRAFORM_VERSION \
 			--build-arg HELM_VERSION=$HELM_VERSION \
-			--build-arg BASHRC_FILE=$BASHRC_FILE \
 			--no-cache \
 			-t $DOCKER_IMAGE_NAME .
 }
@@ -53,7 +55,6 @@ function docker_build_cache {
 		 	--build-arg ARCH=$ARCH \
 			--build-arg TERRAFORM_VERSION=$TERRAFORM_VERSION \
 			--build-arg HELM_VERSION=$HELM_VERSION \
-			--build-arg BASHRC_FILE=$BASHRC_FILE \
 			-t $DOCKER_IMAGE_NAME .
 }
 
@@ -74,7 +75,6 @@ SCRIPTNAME=$0
 BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd )
 RUN_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )" # the directory that this script is run from 
 INSTALL_DIR="$RUN_DIR/install"
-BASHRC_FILE="docker_bashrc"
 DOCKER_IMAGE_NAME="ml-aws-mfa:1"
 trap 'rm -f "$INSTALL_DIR/$BASHRC_FILE" ' ERR
 
@@ -93,7 +93,7 @@ while getopts "v:nhH" OPTION ; do
 	esac
 done
 
-check_and_add_mfa_device_to_docker_bashrc
+# check_and_add_mfa_device_to_docker_bashrc
 
 if  [[ -z {$NOCACHE} ]] ; then
 	printf "\nrebuilding from scratch  (docker nocache flag)  \n"
@@ -102,7 +102,7 @@ else
 	printf "\nrebuilding using the cache  \n"
 	docker_build_cache
 fi
-rm -f "$INSTALL_DIR/$BASHRC_FILE"
+#rm -f "$INSTALL_DIR/$BASHRC_FILE"
 
 
 

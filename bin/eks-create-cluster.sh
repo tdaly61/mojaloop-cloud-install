@@ -6,8 +6,6 @@
 
 # todo list :
 # - run terraform apply or destroy depending on mode 
-# - configure .kube/config
-# - install or remove nginx 
 
 
 function verify_credentials {
@@ -63,31 +61,35 @@ function configure_kubectl {
 
 
 function deploy_nginx_configure_nlb {
-  printf "==> deploy nginx with meta-data set to provision AWS NLB (network load balancer) \n" 
+  printf "==> deploy nginx with meta-data set to provision load balancer  " 
   nginx_exists=`helm ls -a --namespace $NGINX_NAMESPACE  | grep "nginx" | awk '{print $1}' `
   if [ ! -z $nginx_exists ] && [ "$nginx_exists" == "nginx" ]; then 
-    printf "    ** NOTE: nginx is already installed .. skipping \n"
+    printf "    [ nginx already installed .. skipping]  \n"
   else 
     helm install nginx ingress-nginx/ingress-nginx \
       --set controller.service.type=LoadBalancer \
       --set controller.ingressClassResource.default=true \
-      --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb"
+      --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb" > /dev/null 2>&1 
+    if [[ $? -eq 0 ]]; then 
+      printf "[ok]\n"
+    else 
+      printf "\n    *** warning   : some error occurred while deploying nginx \n"
+    fi 
   fi
 }
 
 function add_helm_repos { 
-    # see readme at https://github.com/mojaloop/helm for required helm libs 
-    printf "==> add the helm repos required to install and run Mojaloop version 13.x \n" 
-    su - $k8s_user -c "helm repo add kiwigrid https://kiwigrid.github.io" > /dev/null 2>&1
-    su - $k8s_user -c "helm repo add kokuwa https://kokuwaio.github.io/helm-charts" > /dev/null 2>&1  #fluentd 
-    su - $k8s_user -c "helm repo add elastic https://helm.elastic.co" > /dev/null 2>&1
-    su - $k8s_user -c "helm repo add codecentric https://codecentric.github.io/helm-charts" > /dev/null 2>&1 # keycloak for TTK
-    su - $k8s_user -c "helm repo add bitnami https://charts.bitnami.com/bitnami" > /dev/null 2>&1
-    su - $k8s_user -c "helm repo add mojaloop http://mojaloop.io/helm/repo/" > /dev/null 2>&1
-    su - $k8s_user -c "helm repo add cowboysysop https://cowboysysop.github.io/charts/" > /dev/null 2>&1  # mongo-express
-    su - $k8s_user -c "helm repo add redpanda-data https://charts.redpanda.com/ " > /dev/null 2>&1   # kafka console 
-
-    su - $k8s_user -c "helm repo update" > /dev/null 2>&1
+    printf "==> add the helm repos required to install and run Mojaloop vnext-alpha \n" 
+    helm repo add kiwigrid https://kiwigrid.github.io > /dev/null 2>&1
+    helm repo add kokuwa https://kokuwaio.github.io/helm-charts > /dev/null 2>&1  #fluentd 
+    helm repo add elastic https://helm.elastic.co > /dev/null 2>&1
+    helm repo add codecentric https://codecentric.github.io/helm-charts > /dev/null 2>&1 # keycloak for TTK
+    helm repo add bitnami https://charts.bitnami.com/bitnami > /dev/null 2>&1
+    helm repo add mojaloop http://mojaloop.io/helm/repo/ > /dev/null 2>&1
+    helm repo add cowboysysop https://cowboysysop.github.io/charts/ > /dev/null 2>&1  # mongo-express
+    helm repo add redpanda-data https://charts.redpanda.com/ > /dev/null 2>&1   # kafka console 
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx   # nginx 
+    helm repo update 
 }
 
 function delete_nginx {
@@ -133,7 +135,7 @@ function delete_cluster {
 
 function print_end_message { 
     printf "\n\n*********************** << success >> *******************************************\n"
-    printf "            -- AWS EKS Cluster install for Mojaloop utility -- \n"
+    printf "            -- AWS EKS managed kubernetes cluster  -- \n"
     printf "  utilities for deploying kubernetes in preparation for Mojaloop deployment   \n"
     printf "************************** << end  >> *******************************************\n\n"
 } 
@@ -168,11 +170,11 @@ Options:
 BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd )
 # RUN_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )" # the directory that this script is run from 
 # SCRIPTS_DIR="$( cd $(dirname "$0")/../scripts ; pwd )"
+
+TERRAFORM_RUN_DIR="/terraform/$TERRAFORM_CLUSTER_DIR"  # TERRFORM_CLUSTER_DIR should already be set in the environment of the container
 CLUSTER_NAME=`grep cluster_name $TERRAFORM_DIR/terraform.tfvars | cut -d "\"" -f2`
 CLUSTER_EXISTS=""
 NGINX_NAMESPACE="default" 
-
-
 
 # Check arguments
 if [ $# -lt 1 ] ; then
@@ -197,34 +199,31 @@ while getopts "m:hH" OPTION ; do
 done
 
 printf "\n\n*********************************************************************************\n"
-printf "            -- AWS EKS managed kubernetes install utility -- \n"
-printf " for deploying managed kubernetes cluster in preparation for Mojaloop deployment \n"
+printf "            -- AWS EKS managed kubernetes cluster -- \n"
+printf "  utilities for deploying kubernetes in preparation for Mojaloop deployment   \n"
 printf "************************* << start >> *******************************************\n\n"
 # set_user
 # verify_user
-cd $TERRAFORM_DIR  # TERRFORM_DIR is set in the environment of the container 
+cd $TERRAFORM_RUN_DIR   
 
 
 if [[ "$mode" == "create" ]]  ; then
+    printf "Creating  Cluster [%s] in directory [%s] ... \n" $CLUSTER_NAME $TERRAFORM_RUN_DIR 
     verify_credentials
     terraform init > /dev/null 2>&1 
-    check_if_cluster_already_created 
-    
+    check_if_cluster_already_created   
     #create_cluster    # run terraform 
     configure_kubectl # enable kubectl access to the cluster, and test it works 
+    add_helm_repos
     deploy_nginx_configure_nlb 
 
-
-    #set_k8s_version
-    # k8s_already_installed
-    # add_helm_repos 
-    # check_k8s_installed
     # printf "==> kubernetes distro:[%s] version:[%s] is now configured for user [%s] and ready for mojaloop deployment \n" \
     #             "$k8s_distro" "$K8S_VERSION" "$k8s_user"
     # printf "    To deploy mojaloop, please su - %s from root or login as user [%s] and then \n"  "$k8s_user" "$k8s_user"
     # printf "    please execute %s/mojaloop-install.sh\n" "$SCRIPTS_DIR"
     print_end_message 
 elif [[ "$mode" == "delete" ]]  ; then
+    printf "Deleting Cluster [%s] in directory [%s] ... \n" $CLUSTER_NAME $TERRAFORM_RUN_DIR 
     verify_credentials
     terraform init > /dev/null 2>&1 
     check_if_cluster_already_created 

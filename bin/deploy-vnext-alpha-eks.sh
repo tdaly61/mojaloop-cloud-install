@@ -143,18 +143,18 @@ function add_helm_repos {
     helm repo update 
 }
 
-function deploy_nginx_configure_nlb {
-  printf "==> deploy nginx with meta-data set to provision AWS NLB (network load balancer) \n" 
-  nginx_exists=`helm ls -a --namespace $NAMESPACE | grep "nginx" | awk '{print $1}' `
-  if [ ! -z $nginx_exists ] && [ "$nginx_exists" == "nginx" ]; then 
-    printf "    ** NOTE: nginx is already installed .. skipping \n"
-  else 
-    helm install nginx ingress-nginx/ingress-nginx \
-      --set controller.service.type=LoadBalancer \
-      --set controller.ingressClassResource.default=true \
-      --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb"
-  fi
-}
+# function deploy_nginx_configure_nlb {
+#   printf "==> deploy nginx with meta-data set to provision AWS NLB (network load balancer) \n" 
+#   nginx_exists=`helm ls -a --namespace $NAMESPACE | grep "nginx" | awk '{print $1}' `
+#   if [ ! -z $nginx_exists ] && [ "$nginx_exists" == "nginx" ]; then 
+#     printf "    ** NOTE: nginx is already installed .. skipping \n"
+#   else 
+#     helm install nginx ingress-nginx/ingress-nginx \
+#       --set controller.service.type=LoadBalancer \
+#       --set controller.ingressClassResource.default=true \
+#       --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb"
+#   fi
+# }
 
 
 function set_and_create_namespace { 
@@ -647,12 +647,11 @@ elif [[ "$mode" == "install_ml" ]]; then
   clone_mojaloop_repo 
   configure_extra_options 
   modify_local_mojaloop_yaml_and_charts
-  deploy_nginx_configure_nlb
   install_infra_from_local_chart
   install_mojaloop_layer "crosscut" $CROSSCUT_DIR 
   install_mojaloop_layer "apps" $APPS_DIR
   install_mojaloop_layer "ttk" $TTK_DIR
-  #restore_data
+  restore_data
   check_urls
 
   tstop=$(date +%s)

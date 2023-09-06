@@ -442,16 +442,16 @@ function restore_data {
   error_message=" restoring the testing toolkit data failed  "
   printf "      - testing toolkit data and environment config   " 
 
-  # copy in the bluebank TTK environment data 
-  # only need bluebank as we run the TTK from there.
-  file_base="$ETC_DIR/ttk/bluebank"
-  file1="dfsp_local_environment.json"
-  file2="hub_local_environment.json"
-  pod_dest="/opt/app/examples/environments" 
-  pod="bluebank-backend-0" 
-  kubectl cp "$file_base/$file1" "$pod:$pod_dest"
-  kubectl cp "$file_base/$file2" "$pod:$pod_dest"
-  kubectl cp "$file_base/$file3" "$pod:$pod_dest"
+  # # copy in the bluebank TTK environment data 
+  # # only need bluebank as we run the TTK from there.
+  # file_base="$ETC_DIR/ttk/bluebank"
+  # file1="dfsp_local_environment.json"
+  # file2="hub_local_environment.json"
+  # pod_dest="/opt/app/examples/environments" 
+  # pod="bluebank-backend-0" 
+  # kubectl cp "$file_base/$file1" "$pod:$pod_dest"
+  # kubectl cp "$file_base/$file2" "$pod:$pod_dest"
+  # kubectl cp "$file_base/$file3" "$pod:$pod_dest"
   printf " [ ok ] \n"
 }
 
@@ -531,7 +531,7 @@ function showUsage {
 echo  "USAGE: $0 -m <mode> [-d dns domain] [-n namespace] [-t secs] [-o options] [-f] 
 Example 1 : $0 -m install_ml  # install mojaloop (vnext) 
 Example 2 : $0 -m install_ml -n namespace1  # install mojaloop (vnext)
-Example 3 : $0 -m install_ml -o logging -f # install , turn on logging , force clone of repo
+Example 3 : $0 -m install_ml -f # install , turn on logging , force clone of repo
 Example 4 : $0 -m delete_ml  # delete mojaloop  (vnext)  
 
 Options:

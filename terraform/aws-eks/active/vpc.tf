@@ -29,9 +29,7 @@ module "vpc" {
     # TODO : take out the mojaloop cost_center tags 
     "mojaloop/cost_center" = "vnext"
   }
+  
+  tags = var.cluster_tags
 
-  # move tags to variables 
-  tags = {
-    Environment = "vnext_dev"
-  }
 }

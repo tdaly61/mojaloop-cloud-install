@@ -16,6 +16,14 @@ module "eks" {
     kube-proxy = {
       most_recent = true
     }
+
+  }
+
+  # External encryption key
+  create_kms_key = false
+  cluster_encryption_config = {
+    resources        = ["secrets"]
+    provider_key_arn = module.kms.key_arn
   }
 
   vpc_id     = module.vpc.vpc_id
@@ -37,7 +45,7 @@ module "eks" {
         role = "infra"
       }
 
-      instance_types = ["t2.xlarge"]
+      instance_types = ["t3.xlarge"]
       capacity_type  = "ON_DEMAND"
     }
 
@@ -56,7 +64,7 @@ module "eks" {
         effect = "NO_SCHEDULE"
       }]
 
-      instance_types = ["t3.small"]
+      instance_types = ["t3.xlarge"]
       capacity_type  = "SPOT"
     }
   }
@@ -81,9 +89,8 @@ module "eks" {
 #     }
 #   }
 
-  tags = {
-    Environment = "vnext_dev"
-  }
+  tags = var.cluster_tags
+
 }
 
 

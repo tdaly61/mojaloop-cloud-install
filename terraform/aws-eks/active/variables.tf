@@ -21,3 +21,7 @@ variable "availability_zone_names" {
   type    = list(string)
   default = [" "]
 }
+
+variable "cluster_tags" {
+  type = map(string)
+ }

@@ -6,7 +6,7 @@
 
 ## User settings change these to reflect your locations  
 AWS_CREDENTIALS_DIR="$HOME/.aws"   # directory with the aws "credentials file"
-AWS_PROFILE="vnext"            
+AWS_PROFILE="vnext"    # the aws user you are going to authenticate with , should be in your credentials file i.e. $AWS_CREDENTIALS_DIR/credentials      
 
 SCRIPT_DIR=$( cd $(dirname "$0") ; pwd )
 BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd ) 
@@ -21,17 +21,18 @@ echo $DOCKER_IMAGE_NAME
 USER_NAME=$(whoami)
 # get the user ID of the user running this script
 USER_ID=$(id -u $USER_NAME)
+# terraform directory for AWS 
 TERRAFORM_DIR=$BASE_DIR/terraform/aws-eks
 MOJALOOP_BIN_DIR=$BASE_DIR/bin
 
 echo "RUN_DIR : $RUN_DIR"
-printf "Mounting TERRAFORM from [%s] to /terraform-aws \n" "$TERRAFORM_DIR"
+printf "Mounting TERRAFORM from [%s] to /terraform \n" "$TERRAFORM_DIR"
 echo "Running $DOCKER_IMAGE_NAME container"
 docker run \
   --interactive --tty --rm \
   --volume "$AWS_CREDENTIALS_DIR":/home/${USER_NAME}/.aws \
   --env AWS_PROFILE="$AWS_PROFILE" \
-  --volume "$TERRAFORM_DIR":/terraform-aws \
+  --volume "$TERRAFORM_DIR":/terraform \
   --volume "$MOJALOOP_BIN_DIR":/mojaloop_cloud_bin \
   --hostname "container-vnext-eks" \
   --entrypoint=/bin/bash $DOCKER_IMAGE_NAME $@

@@ -7,7 +7,8 @@
 # Date June 2023
 
 # todo list :
-# - make automation super-simple (electron -> .ini -> as input)
+# - make automation super-simple (electron -> .ini -> as input) ??
+# - finish healthchecks after install 
 # - setting kubectl config: if you are not in the terraform directory to run this it fails with an aws error => make this more robust
 # - cleanup: make sure all resources are cleaned up
 # - implement -o logging properly => no option just default to install , also all consoles on !
@@ -98,20 +99,8 @@ function set_logfiles {
 
 function configure_extra_options {
   printf "==> configuring which Mojaloop vNext options to install   \n" 
-  for mode in $(echo $install_opt | sed "s/,/ /g"); do
-    case $mode in
-      logging) MOJALOOP_CONFIGURE_FLAGS_STR+="--logging "
-               ram_warning="true"
-        ;;
-      allocate) MOJALOOP_CONFIGURE_FLAGS_STR+="--allocate"
-      ;;
-      *)
-          printf " ** Error: specifying -o option \n"
-          printf "    try $0 -h for help \n" 
-          exit 1 
-        ;;
-    esac
-  done 
+  # for vNext running in managed kubernetes we always turn logging and auditing on
+  MOJALOOP_CONFIGURE_FLAGS_STR+="--logging "
 } 
 
 function configure_kubectl { 
@@ -126,7 +115,6 @@ function configure_kubectl {
     fi 
   fi
   exit 
-
 }
 
 function add_helm_repos { 
@@ -142,20 +130,6 @@ function add_helm_repos {
     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx   # nginx 
     helm repo update 
 }
-
-# function deploy_nginx_configure_nlb {
-#   printf "==> deploy nginx with meta-data set to provision AWS NLB (network load balancer) \n" 
-#   nginx_exists=`helm ls -a --namespace $NAMESPACE | grep "nginx" | awk '{print $1}' `
-#   if [ ! -z $nginx_exists ] && [ "$nginx_exists" == "nginx" ]; then 
-#     printf "    ** NOTE: nginx is already installed .. skipping \n"
-#   else 
-#     helm install nginx ingress-nginx/ingress-nginx \
-#       --set controller.service.type=LoadBalancer \
-#       --set controller.ingressClassResource.default=true \
-#       --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb"
-#   fi
-# }
-
 
 function set_and_create_namespace { 
   ## Set and create namespace if necessary 
@@ -181,9 +155,25 @@ function clone_mojaloop_repo {
     printf " [ done ] \n"
   else 
     printf "\n    ** INFO: vnext  repo is not cloned as there is an existing $REPO_DIR directory\n"
-    printf "    to get a fresh clone of the repo , either delete $REPO_DIR of use the -f flag **\n"
+    printf "    to get a fresh clone of the Mojaloop platform-shared-tools repo , either delete $REPO_DIR or use the -f flag **\n"
   fi
 }
+
+# function modify_local_mojaloop_yaml_and_charts {
+#   printf "==> configuring Mojaloop vNext yaml and helm chart values \n" 
+#   if [ ! -z ${domain_name+x} ]; then 
+#     printf "==> setting domain name to <%s> \n " $domain_name 
+#     MOJALOOP_CONFIGURE_FLAGS_STR+="--domain_name $domain_name " 
+#   fi
+
+#   # TODO We want to avoid running the helm repackage when we don't need to 
+#   printf "     executing $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
+#   $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR 
+#   if [[ $? -ne 0  ]]; then 
+#       printf " [ failed ] \n"
+#       exit 1 
+#   fi 
+# }
 
 function modify_local_mojaloop_yaml_and_charts {
   printf "==> configuring Mojaloop vNext yaml and helm chart values \n" 
@@ -192,23 +182,6 @@ function modify_local_mojaloop_yaml_and_charts {
     MOJALOOP_CONFIGURE_FLAGS_STR+="--domain_name $domain_name " 
   fi
 
-  # TODO We want to avoid running the helm repackage when we don't need to 
-  printf "     executing $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
-  $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR 
-  if [[ $? -ne 0  ]]; then 
-      printf " [ failed ] \n"
-      exit 1 
-  fi 
-}
-
-function modify_local_mojaloop_yaml_and_charts {
-  printf "==> configuring Mojaloop vNext yaml and helm chart values \n" 
-  if [ ! -z ${domain_name+x} ]; then 
-    printf "==> setting domain name to <%s> \n " $domain_name 
-    MOJALOOP_CONFIGURE_FLAGS_STR+="--domain_name $domain_name " 
-  fi
-
-  
   # Check if MOJALOOP_CONFIGURE_FLAGS_STR contains "logging"
   # set the repackage scope depending on if logging will be toggled on not 
   if [[ $MOJALOOP_CONFIGURE_FLAGS_STR == *"logging"* ]]; then
@@ -531,7 +504,7 @@ function showUsage {
 echo  "USAGE: $0 -m <mode> [-d dns domain] [-n namespace] [-t secs] [-o options] [-f] 
 Example 1 : $0 -m install_ml  # install mojaloop (vnext) 
 Example 2 : $0 -m install_ml -n namespace1  # install mojaloop (vnext)
-Example 3 : $0 -m install_ml -f # install , turn on logging , force clone of repo
+Example 3 : $0 -m install_ml -f # install mojaloop (vnext) and force clone of repo
 Example 4 : $0 -m delete_ml  # delete mojaloop  (vnext)  
 
 Options:
@@ -540,7 +513,6 @@ Options:
 -n namespace ....... the kubernetes namespace to deploy mojaloop into 
 -f force ........... force the cloning and updating of the Mojaloop vNext repo
 -t secs ............ number of seconds (timeout) to wait for pods to all be reach running state
--o options(s) .......ml vNext options to toggle on ( logging )
 -h|H ............... display this message
 "
 	fi
@@ -570,7 +542,7 @@ echo $SCRIPT_DIR
 echo $BASE_DIR
 
 ETC_DIR="$( cd $(dirname "$0")/../etc ; pwd )"
-REPO_BASE_DIR=$HOME/vnext
+REPO_BASE_DIR=$HOME/tmp
 #SCRIPTS_DIR="$( cd $(dirname "$0")/../scripts ; pwd )"
 REPO_DIR=$REPO_BASE_DIR/platform-shared-tools
 DEPLOYMENT_DIR=$REPO_DIR/packages/deployment/k8s
@@ -580,14 +552,14 @@ export APPS_DIR=$DEPLOYMENT_DIR/apps
 export TTK_DIR=$DEPLOYMENT_DIR/ttk
 NEED_TO_REPACKAGE="true"
 export MOJALOOP_CONFIGURE_FLAGS_STR=" -d $REPO_BASE_DIR " 
-EXTERNAL_ENDPOINTS_LIST=( vnextadmin fspiop.local bluebank.local greenbank.local ) 
+EXTERNAL_ENDPOINTS_LIST=( vnextadmin fspiop.local bluebank.local greenbank.local) 
 LOGGING_ENDPOINTS_LIST=( elasticsearch.local )
 declare -A timer_array
 declare -A memstats_array
 #record_memory_use "at_start"
 
 # Process command line options as required
-while getopts "fD:d:m:t:l:o:hH" OPTION ; do
+while getopts "fD:d:m:t:l:hH" OPTION ; do
    case "${OPTION}" in
         D)  TERRAFORM_DIRECTORY="${OPTARG}"
         ;;
@@ -604,8 +576,6 @@ while getopts "fD:d:m:t:l:o:hH" OPTION ; do
             exit 1 
         ;; 
         m)  mode="${OPTARG}"
-        ;;
-        o)  install_opt="${OPTARG}"
         ;; 
         h|H)	showUsage
                 exit 0
@@ -626,7 +596,6 @@ set_logfiles
 set_and_create_namespace
 set_mojaloop_timeout
 #configure_kubectl 
-add_helm_repos
 
 printf "\n"
 
@@ -644,6 +613,7 @@ if [[ "$mode" == "delete_ml" || "$mode" == "cleanup" ]]; then
 elif [[ "$mode" == "install_ml" ]]; then
   tstart=$(date +%s)
   printf "start : Mojaloop (vNext) install utility [%s]\n" "`date`" >> $LOGFILE
+  add_helm_repos
   clone_mojaloop_repo 
   configure_extra_options 
   modify_local_mojaloop_yaml_and_charts
@@ -653,7 +623,6 @@ elif [[ "$mode" == "install_ml" ]]; then
   install_mojaloop_layer "ttk" $TTK_DIR
   restore_data
   check_urls
-
   tstop=$(date +%s)
   telapsed=$(timer $tstart $tstop)
   timer_array[install_ml]=$telapsed

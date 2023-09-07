@@ -41,7 +41,7 @@ function create_cluster {
     printf "    ***\n"
     exit 1
   fi
-  printf "\n"
+  terraform apply 
 }
 
 function configure_kubectl {
@@ -172,7 +172,7 @@ BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd )
 # SCRIPTS_DIR="$( cd $(dirname "$0")/../scripts ; pwd )"
 
 TERRAFORM_RUN_DIR="/terraform/$TERRAFORM_CLUSTER_DIR"  # TERRFORM_CLUSTER_DIR should already be set in the environment of the container
-CLUSTER_NAME=`grep cluster_name $TERRAFORM_DIR/terraform.tfvars | cut -d "\"" -f2`
+CLUSTER_NAME=`grep cluster_name $TERRAFORM_RUN_DIR/terraform.tfvars | cut -d "\"" -f2`
 CLUSTER_EXISTS=""
 NGINX_NAMESPACE="default" 
 
@@ -212,7 +212,7 @@ if [[ "$mode" == "create" ]]  ; then
     verify_credentials
     terraform init > /dev/null 2>&1 
     check_if_cluster_already_created   
-    #create_cluster    # run terraform 
+    create_cluster    # run terraform 
     configure_kubectl # enable kubectl access to the cluster, and test it works 
     add_helm_repos
     deploy_nginx_configure_nlb 
@@ -228,7 +228,7 @@ elif [[ "$mode" == "delete" ]]  ; then
     terraform init > /dev/null 2>&1 
     check_if_cluster_already_created 
     delete_nginx 
-    #delete_cluster
+    delete_cluster
     print_end_message 
 else 
     showUsage

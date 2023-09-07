@@ -15,13 +15,20 @@ BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd )
 
 # point to the docker image that results from running build.sh 
 DOCKER_IMAGE_NAME=`grep DOCKER_IMAGE_NAME= $SCRIPT_DIR/build.sh | cut -d "\"" -f2 | awk '{print $1}'`
-# get the username snf id of the user running this script
+# get the username and id of the user running this script
 USER_NAME=$(whoami)
 USER_ID=$(id -u $USER_NAME)
 # terraform directory for AWS 
 HOST_TERRAFORM_DIR=$BASE_DIR/terraform/aws-eks
- 
-MOJALOOP_BIN_DIR=$BASE_DIR/bin
+ MOJALOOP_BIN_DIR=$BASE_DIR/bin
+
+if [ ! -d "$HOME/.kube" ]; then 
+  mkdir "$HOME/.kube"
+fi 
+
+if [ ! -d "$HOME/tmp" ]; then 
+  mkdir "$HOME/tmp"  # used by the Mojaloop install script 
+fi 
 
 echo "RUN_DIR : $RUN_DIR"
 printf "Mounting TERRAFORM from [%s] to /terraform \n" "$HOST_TERRAFORM_DIR"
@@ -33,8 +40,8 @@ docker run \
   --env TERRAFORM_CLUSTER_DIR="$TERRAFORM_CLUSTER_DIR" \
   --volume "$HOST_TERRAFORM_DIR":/terraform \
   --volume "$MOJALOOP_BIN_DIR":/mojaloop_cloud_bin \
+  --volume "$HOME/tmp":/home/${USER_NAME}/tmp \
+  --volume "$HOME/.kube":/home/${USER_NAME}/.kube \
   --hostname "container-vnext-eks" \
   --entrypoint=/bin/bash $DOCKER_IMAGE_NAME $@
-
-
 

@@ -143,13 +143,16 @@ function set_and_create_namespace {
 }
 
 function clone_mojaloop_repo { 
-  printf "==> cloning mojaloop vNext repo  "
+  printf "==> cloning mojaloop vNext repo to [%s]" $REPO_DIR
+  # echo "repo dir : $REPO_DIR"
+  # echo "repo base dir : $REPO_BASE_DIR"
   if [ ! -z "$force" ]; then 
     #printf "==> removing existing helm directory\n"
-    rm -rf  "$REPO_BASE_DIR" >> $LOGFILE 2>>$ERRFILE
+    rm -rf  "$REPO_DIR" >> $LOGFILE 2>>$ERRFILE
   fi 
-  if [ ! -d "$REPO_BASE_DIR" ]; then 
-    mkdir "$REPO_BASE_DIR"
+  if [ ! -d "$REPO_DIR" ]; then 
+    #mkdir "$REPO_BASE_DIR"
+    #echo "git clone --branch $MOJALOOP_BRANCH https://github.com/mojaloop/platform-shared-tools.git $REPO_DIR > /dev/null 2>&1"
     git clone --branch $MOJALOOP_BRANCH https://github.com/mojaloop/platform-shared-tools.git $REPO_DIR > /dev/null 2>&1
     NEED_TO_REPACKAGE="true"
     printf " [ done ] \n"
@@ -186,7 +189,6 @@ function modify_local_mojaloop_yaml_and_charts {
   # set the repackage scope depending on if logging will be toggled on not 
   if [[ $MOJALOOP_CONFIGURE_FLAGS_STR == *"logging"* ]]; then
     if ls $CROSSCUT_DIR | grep -q '\.off$'; then
-      #echo "off files => turning on => need to repackage "
       NEED_TO_REPACKAGE="true"
     fi 
   else # no logging specified 
@@ -195,7 +197,7 @@ function modify_local_mojaloop_yaml_and_charts {
       NEED_TO_REPACKAGE="true"
     fi 
   fi
-  printf "     executing $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
+  printf "    executing $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR  \n" 
   $SCRIPT_DIR/vnext_configure.py $MOJALOOP_CONFIGURE_FLAGS_STR 
   if [[ $? -ne 0  ]]; then 
       printf " [ failed ] \n"
@@ -228,39 +230,57 @@ function repackage_infra_helm_chart {
 }
 
 function delete_mojaloop_infra_release {
-  printf "==> uninstalling Mojaloop (vNext) infrastructure svcs : helm delete %s --namespace %s" "$NAMESPACE" "$INFRA_RELEASE_NAME"
-  ml_exists=`helm ls -a --namespace $NAMESPACE | grep $INFRA_RELEASE_NAME | awk '{print $1}' `
-  if [ ! -z $ml_exists ] && [ "$ml_exists" == "$INFRA_RELEASE_NAME" ]; then 
-    helm delete $INFRA_RELEASE_NAME --namespace $NAMESPACE >> $LOGFILE 2>>$ERRFILE
-    if [[ $? -eq 0  ]]; then 
-      printf " [ ok ] \n"
-    else
-      printf "\n** Error: helm delete possibly failed \n" "$INFRA_RELEASE_NAME"
-      printf "   run helm delete %s manually   \n" $INFRA_RELEASE_NAME
-      printf "   also check the pods using kubectl get pods --namespace   \n" $INFRA_RELEASE_NAME
-      exit 1
-    fi
+  printf "==> uninstalling Mojaloop (vNext) infrastructure svcs and deleting resources: helm delete %s --namespace %s" "$NAMESPACE" "$HELM_INFRA_RELEASE_NAME"
+  ml_exists=`helm ls -a --namespace $NAMESPACE | grep $HELM_INFRA_RELEASE_NAME | awk '{print $1}' `
+  if [ ! -z $ml_exists ] && [ "$ml_exists" == "$HELM_INFRA_RELEASE_NAME" ]; then 
+    helm delete $HELM_INFRA_RELEASE_NAME --namespace $NAMESPACE >> $LOGFILE 2>>$ERRFILE
+    sleep 2
   else 
-    printf "\n    [ infrastructure services release %s not deployed => nothing to delete ] \n" $INFRA_RELEASE_NAME
+    printf "\n    [ infrastructure services release %s not deployed => nothing to delete ]   " $HELM_INFRA_RELEASE_NAME
   fi
+  # now check helm infra release is gone 
+  ml_exists=`helm ls -a --namespace $NAMESPACE | grep $HELM_INFRA_RELEASE_NAME | awk '{print $1}' `
+  if [ ! -z $ml_exists ] && [ "$ml_exists" == "$HELM_INFRA_RELEASE_NAME" ]; then 
+      printf "\n** Error: helm delete possibly failed \n" "$HELM_INFRA_RELEASE_NAME"
+      printf "   run helm delete %s manually   \n" $HELM_INFRA_RELEASE_NAME
+      printf "   also check the pods using kubectl get pods --namespace   \n" $HELM_INFRA_RELEASE_NAME
+      exit 1
+  fi
+  # now check that the persistent volumes got cleaned up
+  pvc_exists=`kubectl get pvc --namespace "$NAMESPACE"  2>>$ERRFILE | grep $HELM_INFRA_RELEASE_NAME` >> $LOGFILE 2>>$ERRFILE
+  if [ ! -z "$pvc_exists" ]; then 
+    kubectl get pvc --namespace "$NAMESPACE" | cut -d " " -f1 | xargs kubectl delete pvc >> $LOGFILE 2>>$ERRFILE
+    kubectl get pv  --namespace "$NAMESPACE" | cut -d " " -f1 | xargs kubectl delete pv >> $LOGFILE 2>>$ERRFILE
+  fi 
+  # and chexk the pvc and pv are gone 
+  pvc_exists=`kubectl get pvc --namespace "$NAMESPACE" 2>>$ERRFILE | grep $HELM_INFRA_RELEASE_NAME 2>>$ERRFILE`
+  if [ ! -z "$pvc_exists" ]; then
+    printf "** Error: the backend persistent volume resources may not have deleted properly  \n" 
+    printf "   please try running the delete again or use helm and kubectl to remove manually  \n"
+    printf "   ensure no pv or pvc resources remain defore trying to re-install ** \n"
+    exit 1
+  fi
+  # if we get to here then we are reasonably confident infrastructure resources are cleanly deleted
+  printf " [ ok ] \n"
 }
 
+
 function install_infra_from_local_chart  {
-  printf "start :  Mojaloop vNext-alpha install infrastructure services [%s]\n" "`date`" 
+  printf "==> <Start> install infrastructure services [%s]\n" "`date`" 
   delete_mojaloop_infra_release
   repackage_infra_helm_chart
   # install the chart
   printf  "==> deploy Mojaloop vNext infrastructure via %s helm chart and wait for upto %s  secs for it to be ready \n" "$ML_RELEASE_NAME" "$TIMEOUT_SECS"
-  printf  "    executing helm install $INFRA_RELEASE_NAME --wait --timeout $TIMEOUT_SECS $INFRA_DIR/infra-helm  \n "
+  printf  "    executing helm install $HELM_INFRA_RELEASE_NAME --wait --timeout $TIMEOUT_SECS $INFRA_DIR/infra-helm  \n "
   tstart=$(date +%s)
-  helm install $INFRA_RELEASE_NAME --wait --timeout $TIMEOUT_SECS  --namespace "$NAMESPACE" $INFRA_DIR/infra-helm  >> $LOGFILE 2>>$ERRFILE
+  helm install $HELM_INFRA_RELEASE_NAME --wait --timeout $TIMEOUT_SECS  --namespace "$NAMESPACE" $INFRA_DIR/infra-helm  >> $LOGFILE 2>>$ERRFILE
   tstop=$(date +%s)
   telapsed=$(timer $tstart $tstop)
-  if [[ `helm status $INFRA_RELEASE_NAME  --namespace "$NAMESPACE" | grep "^STATUS:" | awk '{ print $2 }' ` = "deployed" ]] ; then 
-    printf "   helm release [%s] deployed ok  \n" "$INFRA_RELEASE_NAME"
+  if [[ `helm status $HELM_INFRA_RELEASE_NAME  --namespace "$NAMESPACE" | grep "^STATUS:" | awk '{ print $2 }' ` = "deployed" ]] ; then 
+    printf "   helm release [%s] deployed ok  \n" "$HELM_INFRA_RELEASE_NAME"
     timer_array[install_infra]=$telapsed
   else 
-    printf "** Error: %s helm chart deployment failed \n" "$INFRA_RELEASE_NAME"
+    printf "** Error: %s helm chart deployment failed \n" "$HELM_INFRA_RELEASE_NAME"
     printf "   Possible reasons include : - \n"
     printf "     very slow internet connection /  issues downloading container images (e.g. docker rate limiting) \n"
     printf "     slow machine/vm instance / insufficient memory to start all pods  \n"
@@ -526,8 +546,10 @@ Options:
 ##
 # Environment Config & global vars 
 ##
-INFRA_RELEASE_NAME="infra"
-MOJALOOP_BRANCH="main"
+MINI_LOOP_DEPLOYMENT="false" 
+HELM_INFRA_RELEASE_NAME="infra"
+MOJALOOP_BRANCH="td_eks_working_br"
+#MOJALOOP_BRANCH="main"
 DEFAULT_NAMESPACE="default"
 k8s_version=""
 K8S_CURRENT_RELEASE_LIST=( "1.26" "1.27" )
@@ -537,9 +559,8 @@ DEFAULT_TIMEOUT_SECS="1200s"
 TIMEOUT_SECS=0
 TERRAFORM_DIRECTORY="."
 SCRIPT_DIR=$( cd $(dirname "$0") ; pwd )
-#BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd ) 
-echo $SCRIPT_DIR
-echo $BASE_DIR
+BASE_DIR=$( cd $(dirname "$0")/../.. ; pwd ) 
+
 
 ETC_DIR="$( cd $(dirname "$0")/../etc ; pwd )"
 REPO_BASE_DIR=$HOME/tmp
@@ -598,17 +619,13 @@ set_mojaloop_timeout
 #configure_kubectl 
 
 printf "\n"
-
-if [[ "$mode" == "delete_ml" || "$mode" == "cleanup" ]]; then
+if [[ "$mode" == "delete_ml" ]] ; then
   check_deployment_dir_exists
   clone_mojaloop_repo # as it might not exist
   delete_mojaloop_layer "ttk" $TTK_DIR
   delete_mojaloop_layer "apps" $APPS_DIR
   delete_mojaloop_layer "crosscut" $CROSSCUT_DIR
   delete_mojaloop_infra_release  
-  if [[ "$mode" == "cleanup" ]]; then
-    helm delete nginx  # remove nginx which will remove NLB too 
-  fi 
   print_end_banner
 elif [[ "$mode" == "install_ml" ]]; then
   tstart=$(date +%s)
@@ -618,7 +635,7 @@ elif [[ "$mode" == "install_ml" ]]; then
   configure_extra_options 
   modify_local_mojaloop_yaml_and_charts
   install_infra_from_local_chart
-  install_mojaloop_layer "crosscut" $CROSSCUT_DIR 
+  install_mojaloop_layer "crosscut" $CROSSCUT_DIR
   install_mojaloop_layer "apps" $APPS_DIR
   install_mojaloop_layer "ttk" $TTK_DIR
   restore_data

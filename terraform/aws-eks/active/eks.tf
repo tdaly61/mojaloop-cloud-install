@@ -39,7 +39,7 @@ module "eks" {
     general = {
       desired_size = 1
       min_size     = 1
-      max_size     = 10
+      max_size     = 3
 
       labels = {
         role = "infra"
@@ -52,7 +52,7 @@ module "eks" {
     spot = {
       desired_size = 1
       min_size     = 1
-      max_size     = 10
+      max_size     = 3
 
       labels = {
         role = "spot"
@@ -69,29 +69,34 @@ module "eks" {
     }
   }
 
-#   manage_aws_auth_configmap = true
-#   aws_auth_roles = [
-#     {
-#       rolearn  = module.eks_admins_iam_role.iam_role_arn
-#       username = module.eks_admins_iam_role.iam_role_name
-#       groups   = ["system:masters"]
-#     },
-#   ]
-
-#   node_security_group_additional_rules = {
-#     ingress_allow_access_from_control_plane = {
-#       type                          = "ingress"
-#       protocol                      = "tcp"
-#       from_port                     = 9443
-#       to_port                       = 9443
-#       source_cluster_security_group = true
-#       description                   = "Allow access from control plane to webhook port of AWS load balancer controller"
-#     }
-#   }
-
   tags = var.cluster_tags
 
 }
 
+# https://aws.amazon.com/blogs/containers/amazon-ebs-csi-driver-is-now-generally-available-in-amazon-eks-add-ons/ 
+data "aws_iam_policy" "ebs_csi_policy" {
+  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
 
+module "irsa-ebs-csi" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
+  version = "4.7.0"
+
+  create_role                   = true
+  role_name                     = "AmazonEKSTFEBSCSIRole-${module.eks.cluster_name}"
+  provider_url                  = module.eks.oidc_provider
+  role_policy_arns              = [data.aws_iam_policy.ebs_csi_policy.arn]
+  oidc_fully_qualified_subjects = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
+}
+
+resource "aws_eks_addon" "ebs-csi" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "aws-ebs-csi-driver"
+  addon_version            = "v1.19.0-eksbuild.2"
+  service_account_role_arn = module.irsa-ebs-csi.iam_role_arn
+  tags = {
+    "eks_addon" = "ebs-csi"
+    "terraform" = "true"
+  }
+}
 

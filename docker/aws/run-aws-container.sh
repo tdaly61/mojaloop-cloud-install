@@ -20,7 +20,8 @@ USER_NAME=$(whoami)
 USER_ID=$(id -u $USER_NAME)
 # terraform directory for AWS 
 HOST_TERRAFORM_DIR=$BASE_DIR/terraform/aws-eks
- MOJALOOP_BIN_DIR=$BASE_DIR/bin
+MOJALOOP_BIN_DIR=$BASE_DIR/bin
+MOJALOOP_ETC_DIR=$BASE_DIR/etc
 
 if [ ! -d "$HOME/.kube" ]; then 
   mkdir "$HOME/.kube"
@@ -39,7 +40,8 @@ docker run \
   --env AWS_PROFILE="$AWS_PROFILE" \
   --env TERRAFORM_CLUSTER_DIR="$TERRAFORM_CLUSTER_DIR" \
   --volume "$HOST_TERRAFORM_DIR":/terraform \
-  --volume "$MOJALOOP_BIN_DIR":/mojaloop_cloud_bin \
+  --volume "$MOJALOOP_BIN_DIR":/mojaloop_cloud/bin \
+  --volume "$MOJALOOP_ETC_DIR":/mojaloop_cloud/etc \
   --volume "$HOME/tmp":/home/${USER_NAME}/tmp \
   --volume "$HOME/.kube":/home/${USER_NAME}/.kube \
   --hostname "container-vnext-eks" \
